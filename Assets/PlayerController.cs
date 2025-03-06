@@ -1,116 +1,73 @@
 using UnityEngine;
+
 public class PlayerController : MonoBehaviour
 {
-    [SerializeField] private InputManager inputManager;
-    [SerializeField] private float speed = 5f;
-    [SerializeField] private float airControlMultiplier = 0.3f; // Reduced air control
-    [SerializeField] private float jumpForce = 5f;
-    [SerializeField] private float maxJumpTime = 0.5f;
-    [SerializeField] private LayerMask groundLayer;
+    // Movement Settings
+    [SerializeField] private float speed = 10f;                     // Move speed.
+    [SerializeField] private float airControlMultiplier = 0.5f;     // Reduced control while airborne.
+
+    // Jump Settings 
+    [SerializeField] private float jumpForce = 300f;                 // Jump impulse
+    [SerializeField] private float fallMultiplier = 1.3f;           // Falling too slow by default
+    [SerializeField] private float lowJumpMultiplier = 1.1f;        // Extra gravity if jump is released early.
+
+    
+    [SerializeField] private LayerMask groundLayer;               
 
     private Rigidbody rb;
     private bool isGrounded = false;
-    private bool isJumping = false;
-    private float jumpTimeCounter = 0f;
-    private Vector2 currentMoveInput = Vector2.zero;
 
-    private void Start()
+    void Start()
     {
         rb = GetComponent<Rigidbody>();
-        if (inputManager != null)
+    }
+
+    void Update()
+    {
+        // Horizontal Movement 
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
+        Vector3 moveInput = new Vector3(horizontal, 0f, vertical).normalized;
+        Vector3 desiredVelocity = moveInput * speed;
+        Vector3 currentVelocity = rb.linearVelocity;
+
+        // When grounded, set horizontal velocity directly; in air, reduced control.
+        if (isGrounded)
         {
-            inputManager.OnMove.AddListener(UpdateMoveInput);
-            inputManager.OnReset.AddListener(ResetPlayer);
-            inputManager.OnJump.AddListener(StartJump);
+            currentVelocity.x = desiredVelocity.x;
+            currentVelocity.z = desiredVelocity.z;
         }
         else
         {
-            Debug.LogWarning("InputManager is not assigned in PlayerController.");
+            currentVelocity.x = Mathf.Lerp(currentVelocity.x, desiredVelocity.x, airControlMultiplier);
+            currentVelocity.z = Mathf.Lerp(currentVelocity.z, desiredVelocity.z, airControlMultiplier);
         }
-    }
+        rb.linearVelocity = new Vector3(currentVelocity.x, rb.linearVelocity.y, currentVelocity.z);
 
-    private void Update()
-    {
-        // Handle variable jump height
-        if (isJumping)
+        // Jump Input
+        // On jump button down, if on the ground, reset vertical velocity then add impulse.
+        if (Input.GetButtonDown("Jump") && isGrounded)
         {
-            if (Input.GetKey(KeyCode.Space) && jumpTimeCounter > 0)
-            {
-                rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
-                jumpTimeCounter -= Time.deltaTime;
-            }
-            else
-            {
-                isJumping = false;
-            }
+            rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
         }
     }
 
-    private void FixedUpdate()
+    void FixedUpdate()
     {
-        MovePlayer(currentMoveInput);
-    }
-
-    private void UpdateMoveInput(Vector2 moveInput)
-    {
-        currentMoveInput = moveInput;
-    }
-
-    private void MovePlayer(Vector2 moveInput)
-    {
-        // Get camera-relative directions
-        Transform camTransform = Camera.main.transform;
-        Vector3 camForward = camTransform.forward;
-        camForward.y = 0;
-        camForward.Normalize();
-        Vector3 camRight = camTransform.right;
-        camRight.y = 0;
-        camRight.Normalize();
-
-        // Calculate move direction
-        Vector3 moveDirection = (camForward * moveInput.y + camRight * moveInput.x);
-
-        if (moveDirection.sqrMagnitude > 0.001f)
+        // Faster gravity
+        if (rb.linearVelocity.y < 0)
         {
-            moveDirection.Normalize();
-
-            if (isGrounded)
-            {
-                // Direct control on ground
-                rb.linearVelocity = new Vector3(moveDirection.x * speed, rb.linearVelocity.y, moveDirection.z * speed);
-            }
-            else
-            {
-                // Reduced control in air
-                float currentSpeed = airControlMultiplier * speed;
-                rb.linearVelocity = new Vector3(moveDirection.x * currentSpeed, rb.linearVelocity.y, moveDirection.z * currentSpeed);
-            }
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
         }
-        else if (isGrounded)
+        // Apply a lower jump multiplier if jump held less
+        else if (rb.linearVelocity.y > 0 && !Input.GetButton("Jump"))
         {
-            // No input and on ground: immediately stop horizontal movement
-            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
-        }
-        // When in air with no input, maintain horizontal velocity
-    }
-
-    private void StartJump()
-    {
-        if (isGrounded)
-        {
-            isJumping = true;
-            jumpTimeCounter = maxJumpTime;
-            rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
+            rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
         }
     }
 
-    private void ResetPlayer()
-    {
-        transform.position = Vector3.zero;
-        rb.linearVelocity = Vector3.zero;
-    }
-
-    // Ground detection using collision
+    // Ground detection
     private void OnCollisionEnter(Collision collision)
     {
         if (((1 << collision.gameObject.layer) & groundLayer) != 0)
