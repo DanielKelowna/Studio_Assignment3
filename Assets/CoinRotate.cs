@@ -9,3 +9,4 @@ public class CoinRotate : MonoBehaviour
         transform.Rotate(Vector3.up, rotationSpeed * Time.deltaTime, Space.World);
     }
 }
+//ggg
