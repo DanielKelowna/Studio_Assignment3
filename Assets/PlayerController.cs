@@ -1,84 +1,103 @@
 using UnityEngine;
 
-public class PlayerController : MonoBehaviour
+public class SimplePlayerController : MonoBehaviour
 {
-    // Movement Settings
-    [SerializeField] private float speed = 10f;                     // Move speed.
-    [SerializeField] private float airControlMultiplier = 0.5f;     // Reduced control while airborne.
+    [Header("Movement Settings")]
+    public float moveSpeed = 5f;
 
-    // Jump Settings 
-    [SerializeField] private float jumpForce = 300f;                 // Jump impulse
-    [SerializeField] private float fallMultiplier = 1.3f;           // Falling too slow by default
-    [SerializeField] private float lowJumpMultiplier = 1.1f;        // Extra gravity if jump is released early.
+    [Header("Jump Settings")]
+    public float jumpForce = 8f;         // Upward velocity applied when jumping.
+    public float maxJumpTime = 0.3f;     // Maximum duration the jump button affects the jump.
+    public float fallMultiplier = 2f;    // Multiplier to boost gravity when falling.
 
-    
-    [SerializeField] private LayerMask groundLayer;               
+    [Header("Ground Detection")]
+    [SerializeField] private LayerMask groundLayer;  // Set to the layer(s) representing ground.
 
     private Rigidbody rb;
+    private Camera cam;
+
+    // Jump control variables.
+    private bool isJumping = false;
+    private float jumpTimeCounter = 0f;
     private bool isGrounded = false;
 
     void Start()
     {
         rb = GetComponent<Rigidbody>();
+        cam = Camera.main;
     }
 
     void Update()
     {
-        // Horizontal Movement 
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-        Vector3 moveInput = new Vector3(horizontal, 0f, vertical).normalized;
-        Vector3 desiredVelocity = moveInput * speed;
-        Vector3 currentVelocity = rb.linearVelocity;
+        // --- Movement Relative to Camera ---
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
 
-        // When grounded, set horizontal velocity directly; in air, reduced control.
-        if (isGrounded)
-        {
-            currentVelocity.x = desiredVelocity.x;
-            currentVelocity.z = desiredVelocity.z;
-        }
-        else
-        {
-            currentVelocity.x = Mathf.Lerp(currentVelocity.x, desiredVelocity.x, airControlMultiplier);
-            currentVelocity.z = Mathf.Lerp(currentVelocity.z, desiredVelocity.z, airControlMultiplier);
-        }
-        rb.linearVelocity = new Vector3(currentVelocity.x, rb.linearVelocity.y, currentVelocity.z);
+        // Calculate camera-based forward and right (ignore vertical component).
+        Vector3 camForward = cam.transform.forward;
+        camForward.y = 0;
+        camForward.Normalize();
+        Vector3 camRight = cam.transform.right;
+        camRight.y = 0;
+        camRight.Normalize();
 
-        // Jump Input
-        // On jump button down, if on the ground, reset vertical velocity then add impulse.
+        // Determine movement direction.
+        Vector3 moveDir = (camForward * vertical + camRight * horizontal).normalized;
+
+        // Set horizontal velocity directly (to avoid sliding), preserving vertical velocity.
+        Vector3 newVelocity = moveDir * moveSpeed;
+        newVelocity.y = rb.linearVelocity.y;
+        rb.linearVelocity = newVelocity;
+
+        // --- Jump Logic ---
         if (Input.GetButtonDown("Jump") && isGrounded)
         {
-            rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+            isJumping = true;
+            jumpTimeCounter = maxJumpTime;
+            // Reset vertical velocity then apply jump force.
+            rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
+        }
+        if (Input.GetButton("Jump") && isJumping)
+        {
+            if (jumpTimeCounter > 0)
+            {
+                rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
+                jumpTimeCounter -= Time.deltaTime;
+            }
+            else
+            {
+                isJumping = false;
+            }
+        }
+        if (Input.GetButtonUp("Jump"))
+        {
+            isJumping = false;
         }
     }
 
     void FixedUpdate()
     {
-        // Faster gravity
+        // --- Extra Gravity ---
+        // When falling, apply additional downward velocity.
         if (rb.linearVelocity.y < 0)
         {
             rb.linearVelocity += Vector3.up * Physics.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
         }
-        // Apply a lower jump multiplier if jump held less
-        else if (rb.linearVelocity.y > 0 && !Input.GetButton("Jump"))
-        {
-            rb.linearVelocity += Vector3.up * Physics.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
-        }
     }
 
-    // Ground detection
-    private void OnCollisionEnter(Collision collision)
+    // --- Ground Detection Using a Trigger Collider ---
+    private void OnTriggerEnter(Collider other)
     {
-        if (((1 << collision.gameObject.layer) & groundLayer) != 0)
+        // Check if the other collider is on one of the ground layers.
+        if (((1 << other.gameObject.layer) & groundLayer) != 0)
         {
             isGrounded = true;
         }
     }
 
-    private void OnCollisionExit(Collision collision)
+    private void OnTriggerExit(Collider other)
     {
-        if (((1 << collision.gameObject.layer) & groundLayer) != 0)
+        if (((1 << other.gameObject.layer) & groundLayer) != 0)
         {
             isGrounded = false;
         }
