@@ -1,25 +1,25 @@
 using UnityEngine;
-
 public class PlayerController : MonoBehaviour
 {
     [SerializeField] private InputManager inputManager;
     [SerializeField] private float speed = 5f;
+    [SerializeField] private float airControlMultiplier = 0.3f; // Reduced air control
     [SerializeField] private float jumpForce = 5f;
-    [SerializeField] private float maxJumpTime = 0.5f; // Maximum time the jump force is applied
-    [SerializeField] private LayerMask groundLayer;   // Ground layer mask for collision checking
+    [SerializeField] private float maxJumpTime = 0.5f;
+    [SerializeField] private LayerMask groundLayer;
 
     private Rigidbody rb;
     private bool isGrounded = false;
     private bool isJumping = false;
     private float jumpTimeCounter = 0f;
+    private Vector2 currentMoveInput = Vector2.zero;
 
     private void Start()
     {
         rb = GetComponent<Rigidbody>();
-
         if (inputManager != null)
         {
-            inputManager.OnMove.AddListener(MovePlayer);
+            inputManager.OnMove.AddListener(UpdateMoveInput);
             inputManager.OnReset.AddListener(ResetPlayer);
             inputManager.OnJump.AddListener(StartJump);
         }
@@ -31,68 +31,97 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
-        // If in the middle of a jump, check if the jump key is still held and time remains.
+        // Handle variable jump height
         if (isJumping)
         {
             if (Input.GetKey(KeyCode.Space) && jumpTimeCounter > 0)
             {
-                // Maintain upward velocity while jump is held.
                 rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
                 jumpTimeCounter -= Time.deltaTime;
             }
             else
             {
-                // Jump key released or time expired: stop extra upward force.
                 isJumping = false;
             }
         }
     }
 
-    // Called when movement input is received.
-    private void MovePlayer(Vector2 moveInput)
+    private void FixedUpdate()
     {
-        // Convert 2D input to 3D movement.
-        Vector3 moveDirection = new Vector3(moveInput.x, 0f, moveInput.y).normalized;
-
-        // Directly set horizontal velocity while preserving the current vertical velocity.
-        rb.linearVelocity = new Vector3(moveDirection.x * speed, rb.linearVelocity.y, moveDirection.z * speed);
+        MovePlayer(currentMoveInput);
     }
 
-    // Called when the jump button is pressed.
+    private void UpdateMoveInput(Vector2 moveInput)
+    {
+        currentMoveInput = moveInput;
+    }
+
+    private void MovePlayer(Vector2 moveInput)
+    {
+        // Get camera-relative directions
+        Transform camTransform = Camera.main.transform;
+        Vector3 camForward = camTransform.forward;
+        camForward.y = 0;
+        camForward.Normalize();
+        Vector3 camRight = camTransform.right;
+        camRight.y = 0;
+        camRight.Normalize();
+
+        // Calculate move direction
+        Vector3 moveDirection = (camForward * moveInput.y + camRight * moveInput.x);
+
+        if (moveDirection.sqrMagnitude > 0.001f)
+        {
+            moveDirection.Normalize();
+
+            if (isGrounded)
+            {
+                // Direct control on ground
+                rb.linearVelocity = new Vector3(moveDirection.x * speed, rb.linearVelocity.y, moveDirection.z * speed);
+            }
+            else
+            {
+                // Reduced control in air
+                float currentSpeed = airControlMultiplier * speed;
+                rb.linearVelocity = new Vector3(moveDirection.x * currentSpeed, rb.linearVelocity.y, moveDirection.z * currentSpeed);
+            }
+        }
+        else if (isGrounded)
+        {
+            // No input and on ground: immediately stop horizontal movement
+            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+        }
+        // When in air with no input, maintain horizontal velocity
+    }
+
     private void StartJump()
     {
-        // Only start a jump if player is on the ground.
         if (isGrounded)
         {
             isJumping = true;
             jumpTimeCounter = maxJumpTime;
-
-            // Immediately apply upward velocity.
             rb.linearVelocity = new Vector3(rb.linearVelocity.x, jumpForce, rb.linearVelocity.z);
         }
     }
 
-    // Resets the player to the origin with zero velocity.
     private void ResetPlayer()
     {
         transform.position = Vector3.zero;
         rb.linearVelocity = Vector3.zero;
     }
 
-    // Check if currently colliding with an object in the ground layer.
+    // Ground detection using collision
     private void OnCollisionEnter(Collision collision)
     {
-        // Use bitwise check to see if the collided object is in the groundLayer.
         if (((1 << collision.gameObject.layer) & groundLayer) != 0)
         {
             isGrounded = true;
         }
-
     }
 
     private void OnCollisionExit(Collision collision)
     {
-        if (groundLayer == (groundLayer | (1 << collision.gameObject.layer)))
+        if (((1 << collision.gameObject.layer) & groundLayer) != 0)
         {
             isGrounded = false;
         }
